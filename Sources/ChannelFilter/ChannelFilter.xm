@@ -28,7 +28,7 @@
 
 // ─── ログシステム ─────────────────────────────────────────────────────────────
 static NSMutableArray *_cfLogs;
-static void __attribute__((unused)) CFLog(NSString *format, ...) {
+static void CFLog(NSString *format, ...) {
     va_list args;
     va_start(args, format);
     NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
@@ -259,8 +259,106 @@ static UIImage *cf_stardyLogo(BOOL dark) {
                          orientation:UIImageOrientationUp];
 }
 
+// ─── タブバー判定（iPhone対応） ──────────────────────────────────────────────
+@interface YTPivotBarViewController : UIViewController
+@end
+
+%hook YTPivotBarViewController
+- (void)navigateToItemWithEndpoint:(id)endpoint animated:(BOOL)animated {
+    %orig;
+    if (!endpoint) return;
+    id browseEP = nil;
+    if ([endpoint respondsToSelector:@selector(browseEndpoint)]) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        browseEP = [endpoint performSelector:@selector(browseEndpoint)];
+        #pragma clang diagnostic pop
+    }
+    NSString *browseId = nil;
+    if ([browseEP respondsToSelector:@selector(browseId)]) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        browseId = [browseEP performSelector:@selector(browseId)];
+        #pragma clang diagnostic pop
+    }
+    if (!browseId.length) return;
+    CFLog(@"[PivotBar] navigateToItem browseId=%@", browseId);
+    if ([browseId isEqualToString:@"FEsubscriptions"]) {
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"cf_is_subscription_tab"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        CFLog(@"[PivotBar] FLAG ON");
+    } else if ([browseId hasPrefix:@"FE"]) {
+        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"cf_is_subscription_tab"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        CFLog(@"[PivotBar] FLAG OFF (%@)", browseId);
+    }
+}
+- (void)setSelectedItemEndpoint:(id)endpoint {
+    %orig;
+    if (!endpoint) return;
+    id browseEP = nil;
+    if ([endpoint respondsToSelector:@selector(browseEndpoint)]) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        browseEP = [endpoint performSelector:@selector(browseEndpoint)];
+        #pragma clang diagnostic pop
+    }
+    NSString *browseId = nil;
+    if ([browseEP respondsToSelector:@selector(browseId)]) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        browseId = [browseEP performSelector:@selector(browseId)];
+        #pragma clang diagnostic pop
+    }
+    if (!browseId.length) return;
+    CFLog(@"[PivotBar] setSelected browseId=%@", browseId);
+    if ([browseId isEqualToString:@"FEsubscriptions"]) {
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"cf_is_subscription_tab"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        CFLog(@"[PivotBar] FLAG ON via setSelected");
+    } else if ([browseId hasPrefix:@"FE"]) {
+        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"cf_is_subscription_tab"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+}
+%end
+
 // ─── 機能1-A: 登録チャンネルタブ判定 ─────────────────────────────────────────
 %hook YTBrowseViewController
+// viewWillAppear: でもタブ判定を試みる（iPhoneでsetNavigationEndpointが効かない場合の補完）
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    id s = (id)self;
+    // タイトルからFEsubscriptionsかどうかを判定
+    if ([s respondsToSelector:@selector(navigationEndpoint)]) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id ep = [s performSelector:@selector(navigationEndpoint)];
+        #pragma clang diagnostic pop
+        if (ep && [ep respondsToSelector:@selector(browseEndpoint)]) {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id browseEP = [ep performSelector:@selector(browseEndpoint)];
+            #pragma clang diagnostic pop
+            if (browseEP && [browseEP respondsToSelector:@selector(browseId)]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                NSString *bId = [browseEP performSelector:@selector(browseId)];
+                #pragma clang diagnostic pop
+                if ([bId isEqualToString:@"FEsubscriptions"]) {
+                    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"cf_is_subscription_tab"];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                    CFLog(@"[Endpoint] viewWillAppear FLAG ON");
+                } else if (bId.length > 0 && [bId hasPrefix:@"FE"]) {
+                    [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"cf_is_subscription_tab"];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                    CFLog(@"[Endpoint] viewWillAppear FLAG OFF (%@)", bId);
+                }
+            }
+        }
+    }
+}
+
 - (void)setNavigationEndpoint:(id)endpoint {
     %orig;
     if (!endpoint) return;
@@ -279,12 +377,15 @@ static UIImage *cf_stardyLogo(BOOL dark) {
         #pragma clang diagnostic pop
     }
     if (!browseId.length) return;
+    CFLog(@"[Endpoint] browseId=%@", browseId);
     if ([browseId isEqualToString:@"FEsubscriptions"]) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"cf_is_subscription_tab"];
         [[NSUserDefaults standardUserDefaults] synchronize];
+        CFLog(@"[Endpoint] -> FLAG ON");
     } else if ([browseId hasPrefix:@"FE"]) {
         [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"cf_is_subscription_tab"];
         [[NSUserDefaults standardUserDefaults] synchronize];
+        CFLog(@"[Endpoint] -> FLAG OFF (%@)", browseId);
     }
     // UC...チャンネルページはフラグを変更しない
 }
@@ -327,7 +428,51 @@ static UIImage *cf_stardyLogo(BOOL dark) {
         boolForKey:@"cf_is_subscription_tab"];
     BOOL shouldFilter = !isSubscriptionFeed && ![wl isEmpty];
 
-    // フィルター不要かつ同期不要なら即リターン
+    // iPhoneではsetNavigationEndpointが呼ばれない場合がある
+    // 親VCのナビゲーションエンドポイントを直接確認して補完
+    if (!isSubscriptionFeed) {
+        id s = (id)self;
+        UIResponder *r = (UIResponder *)s;
+        while ((r = r.nextResponder)) {
+            if ([r isKindOfClass:[UIViewController class]]) {
+                id vc = r;
+                if ([vc respondsToSelector:@selector(navigationEndpoint)]) {
+                    #pragma clang diagnostic push
+                    #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    id ep = [vc performSelector:@selector(navigationEndpoint)];
+                    #pragma clang diagnostic pop
+                    if (ep && [ep respondsToSelector:@selector(browseEndpoint)]) {
+                        #pragma clang diagnostic push
+                        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                        id browseEP = [ep performSelector:@selector(browseEndpoint)];
+                        #pragma clang diagnostic pop
+                        if (browseEP && [browseEP respondsToSelector:@selector(browseId)]) {
+                            #pragma clang diagnostic push
+                            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                            NSString *bId = [browseEP performSelector:@selector(browseId)];
+                            #pragma clang diagnostic pop
+                            if ([bId isEqualToString:@"FEsubscriptions"]) {
+                                isSubscriptionFeed = YES;
+                                shouldFilter = NO;
+                                [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"cf_is_subscription_tab"];
+                                [[NSUserDefaults standardUserDefaults] synchronize];
+                                CFLog(@"[AppVC] FEsubscriptions detected via VC chain");
+                            } else if (bId.length > 0 && [bId hasPrefix:@"FE"]) {
+                                [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"cf_is_subscription_tab"];
+                                [[NSUserDefaults standardUserDefaults] synchronize];
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    CFLog(@"[AppVC] count=%lu isSub=%d shouldFilter=%d wlEmpty=%d",
+          (unsigned long)array.count, (int)isSubscriptionFeed,
+          (int)shouldFilter, (int)[wl isEmpty]);
+
     if (!shouldFilter && !isSubscriptionFeed) {
         %orig;
         return;
@@ -367,18 +512,18 @@ static UIImage *cf_stardyLogo(BOOL dark) {
 
             NSString *channelId = cf_extractChannelId((NSData *)elemData);
             if (!channelId.length) {
-                // channelIdが取れない = ショートまたは広告
-                // フィルター中は除去する（登録チャンネル以外なので）
+                // channelIdなし = ショート・広告 → フィルター中は除去
                 if (shouldFilter) [itemsToRemove addIndex:ii];
                 continue;
             }
 
             if (isSubscriptionFeed) {
                 [channelIdsForSync addObject:channelId];
+                CFLog(@"[Sync] %@", channelId);
             } else if (shouldFilter) {
-                if (![wl isChannelAllowed:channelId]) {
-                    [itemsToRemove addIndex:ii];
-                }
+                BOOL allowed = [wl isChannelAllowed:channelId];
+                CFLog(@"[Filter] %@ allowed=%d", channelId, (int)allowed);
+                if (!allowed) [itemsToRemove addIndex:ii];
             }
         }
 
@@ -399,11 +544,15 @@ static UIImage *cf_stardyLogo(BOOL dark) {
     NSMutableArray *filteredArray = [array mutableCopy];
     if (sectionsToRemove.count > 0) {
         [filteredArray removeObjectsAtIndexes:sectionsToRemove];
+        CFLog(@"[AppVC] ✅ removed=%lu remaining=%lu",
+              (unsigned long)sectionsToRemove.count,
+              (unsigned long)filteredArray.count);
     }
     %orig(filteredArray);
 
     if (isSubscriptionFeed && channelIdsForSync.count > 0) {
         [wl syncSubscribedChannelIDs:channelIdsForSync];
+        CFLog(@"[Sync] ✅ synced %lu ids", (unsigned long)channelIdsForSync.count);
     }
 }
 %end
@@ -454,6 +603,97 @@ static UIImage *cf_stardyLogo(BOOL dark) {
             for (UIView *sub in v.subviews) [stack addObject:sub];
         }
     });
+}
+%end
+
+// ─── YTInnerTubeCollectionViewController フック ───────────────────────────────
+// YTAppCollectionViewController の親クラス。
+// ショートなど一部コンテンツはこちら経由で追加される場合がある。
+@interface YTInnerTubeCollectionViewController : UIViewController
+@end
+
+%hook YTInnerTubeCollectionViewController
+- (void)addSectionsFromArray:(NSArray *)array {
+    CFWhitelistManager *wl = [CFWhitelistManager sharedManager];
+    BOOL isSubscriptionFeed = [[NSUserDefaults standardUserDefaults]
+        boolForKey:@"cf_is_subscription_tab"];
+    BOOL shouldFilter = !isSubscriptionFeed && ![wl isEmpty];
+
+    if (!shouldFilter && !isSubscriptionFeed) {
+        %orig;
+        return;
+    }
+
+    NSMutableArray *channelIdsForSync = isSubscriptionFeed
+        ? [NSMutableArray array] : nil;
+    NSMutableIndexSet *sectionsToRemove = [NSMutableIndexSet indexSet];
+
+    for (NSUInteger si = 0; si < array.count; si++) {
+        id section = array[si];
+        NSString *secClass = NSStringFromClass([section class]);
+        if ([secClass containsString:@"FilterChip"] ||
+            [secClass containsString:@"ChipBar"]) continue;
+        if (![section respondsToSelector:@selector(contentsArray)]) continue;
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        NSArray *items = [section performSelector:@selector(contentsArray)];
+        #pragma clang diagnostic pop
+        if (!items.count) continue;
+
+        NSMutableIndexSet *itemsToRemove = [NSMutableIndexSet indexSet];
+        for (NSUInteger ii = 0; ii < items.count; ii++) {
+            id item = items[ii];
+            if (![item respondsToSelector:@selector(elementRenderer)]) continue;
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id elemRenderer = [item performSelector:@selector(elementRenderer)];
+            #pragma clang diagnostic pop
+            if (!elemRenderer) continue;
+            if (![elemRenderer respondsToSelector:@selector(elementData)]) continue;
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            id elemData = [elemRenderer performSelector:@selector(elementData)];
+            #pragma clang diagnostic pop
+            if (!elemData || ![elemData isKindOfClass:[NSData class]]) continue;
+
+            NSString *channelId = cf_extractChannelId((NSData *)elemData);
+            if (!channelId.length) {
+                if (shouldFilter) [itemsToRemove addIndex:ii];
+                continue;
+            }
+
+            if (isSubscriptionFeed) {
+                [channelIdsForSync addObject:channelId];
+            } else if (shouldFilter) {
+                if (![wl isChannelAllowed:channelId]) {
+                    [itemsToRemove addIndex:ii];
+                }
+            }
+        }
+
+        if (itemsToRemove.count > 0) {
+            NSMutableArray *filteredItems = [items mutableCopy];
+            [filteredItems removeObjectsAtIndexes:itemsToRemove];
+            if ([section respondsToSelector:@selector(setContentsArray:)]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [section performSelector:@selector(setContentsArray:)
+                             withObject:filteredItems];
+                #pragma clang diagnostic pop
+            }
+            if (filteredItems.count == 0) [sectionsToRemove addIndex:si];
+        }
+    }
+
+    NSMutableArray *filteredArray = [array mutableCopy];
+    if (sectionsToRemove.count > 0) {
+        [filteredArray removeObjectsAtIndexes:sectionsToRemove];
+    }
+    %orig(filteredArray);
+
+    if (isSubscriptionFeed && channelIdsForSync.count > 0) {
+        [wl syncSubscribedChannelIDs:channelIdsForSync];
+    }
 }
 %end
 
